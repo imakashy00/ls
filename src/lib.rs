@@ -1,4 +1,6 @@
-use std::{ error::Error, path::PathBuf };
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+use std::{ error::Error, fs::Metadata, path::PathBuf };
 
 #[derive(Debug)]
 pub struct DirStr {
@@ -17,38 +19,39 @@ pub struct Config {
 impl Config {
     pub fn build(args: &Vec<String>) -> Result<Config, &'static str> {
         let mut config = Self::default();
-
-        let real_args = &args[1..];
-        let sub_command = &real_args[0];
-        if sub_command.starts_with('-') && sub_command != "-" {
-            for ch in sub_command.chars().skip(1) {
-                match ch {
-                    'a' => {
-                        config.all = true;
-                    }
-                    'l' => {
-                        config.long = true;
-                    }
-                    't' => {
-                        config.time = true;
-                    }
-                    'd' => {
-                        config.directory = true;
-                    }
-                    'S' => {
-                        config.size = true;
-                    }
-                    _ => {
-                        return Err("No such command found");
+        if args.len() > 1 {
+            let real_args = &args[1..];
+            let sub_command = &real_args[0];
+            if sub_command.starts_with('-') && sub_command != "-" {
+                for ch in sub_command.chars().skip(1) {
+                    match ch {
+                        'a' => {
+                            config.all = true;
+                        }
+                        'l' => {
+                            config.long = true;
+                        }
+                        't' => {
+                            config.time = true;
+                        }
+                        'd' => {
+                            config.directory = true;
+                        }
+                        'S' => {
+                            config.size = true;
+                        }
+                        _ => {
+                            return Err("No such command found");
+                        }
                     }
                 }
+            } else {
+                config.paths.push(PathBuf::from(sub_command));
             }
-        } else {
-            config.paths.push(PathBuf::from(sub_command));
-        }
 
-        for arg in &real_args[1..] {
-            config.paths.push(PathBuf::from(arg));
+            for arg in &real_args[1..] {
+                config.paths.push(PathBuf::from(arg));
+            }
         }
         if config.paths.is_empty() {
             config.paths.push(PathBuf::from("."));
@@ -80,8 +83,10 @@ pub fn get_contents(config_path: &Vec<PathBuf>) -> Result<Vec<DirStr>, Box<dyn E
 
     Ok(contents)
 }
-pub fn filter_contents(config: Config, dir_contents: &mut Vec<DirStr>) {
-    // println!("{:?}", contents);
+pub fn filter_contents(
+    config: &Config,
+    dir_contents: &mut Vec<DirStr>
+) -> Result<(), Box<dyn Error>> {
     for dir in dir_contents {
         // -a filter
         if !config.all {
@@ -130,9 +135,108 @@ pub fn filter_contents(config: Config, dir_contents: &mut Vec<DirStr>) {
                 name_a.cmp(name_b)
             });
         }
-        // -l filter
-        // TODO
-        // -d filter
-        // TODO
+    }
+    Ok(())
+}
+
+pub fn display(config: &Config, dir_contents: &[DirStr]) -> Result<(), Box<dyn Error>> {
+    for dir in dir_contents {
+        if !config.directory {
+            println!("--{:?}--", dir.name);
+        }
+        for path in &dir.contents {
+            let mut display_name = path
+                .file_name()
+                .map(|str| str.to_string_lossy().into_owned())
+                .unwrap_or_else(|| dir.name.clone());
+
+            if path.is_dir() {
+                display_name.push('/');
+            }
+            if config.long {
+                let metadata = path.metadata()?;
+                let file_type_char = if path.is_dir() { 'd' } else { '-' };
+                let permissions = parse_permissions(&metadata);
+                let uid = if cfg!(unix) {
+                    #[cfg(unix)]
+                    {
+                        metadata.uid()
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        0
+                    }
+                } else {
+                    0
+                };
+                let gid = if cfg!(unix) {
+                    #[cfg(unix)]
+                    {
+                        metadata.gid()
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        0
+                    }
+                } else {
+                    0
+                };
+                let size = metadata.len();
+                let modified_time = metadata
+                    .modified()
+                    .map(|mod_t| {
+                        let datetime: chrono::DateTime<chrono::Local> = mod_t.into();
+                        datetime.format("%b %d %H:%M").to_string()
+                    })
+                    .unwrap_or_else(|_| String::from("Unkown Time"));
+                println!(
+                    "{}{} 1 {:>5} {:>5} {:>8} {} {}",
+                    file_type_char,
+                    permissions,
+                    uid,
+                    gid,
+                    size,
+                    modified_time,
+                    display_name
+                );
+            } else {
+                print!("{}  ", display_name);
+            }
+            if !config.long {
+                println!();
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_permissions(metadata: &Metadata) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = metadata.permissions().mode();
+        let mut p = String::with_capacity(9);
+        // these are user permissions
+        p.push(if (mode & 0o400) != 0 { 'r' } else { '-' });
+        p.push(if (mode & 0o200) != 0 { 'w' } else { '-' });
+        p.push(if (mode & 0o100) != 0 { 'x' } else { '-' });
+
+        // these are group permissions
+        p.push(if (mode & 0o040) != 0 { 'r' } else { '-' });
+        p.push(if (mode & 0o020) != 0 { 'w' } else { '-' });
+        p.push(if (mode & 0o010) != 0 { 'x' } else { '-' });
+
+        // these are other permissions
+        p.push(if (mode & 0o004) != 0 { 'r' } else { '-' });
+        p.push(if (mode & 0o002) != 0 { 'w' } else { '-' });
+        p.push(if (mode & 0o001) != 0 { 'x' } else { '-' });
+
+        p
+    }
+    #[cfg(not(unix))] // windows OS
+    {
+        (if metadata.permissions().readonly() { "r--r--r--" } else { "rw-rw-rw-" }).to_string()
     }
 }
+
