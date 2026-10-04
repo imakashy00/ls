@@ -1,6 +1,7 @@
 use std::{ env, process };
 
-use ls::{ Config, run };
+mod command;
+use command::{ Config, run };
 
 fn main() {
     let args: Vec<String> = env::args().collect();

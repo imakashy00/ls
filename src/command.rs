@@ -160,29 +160,14 @@ pub fn display(config: &Config, dir_contents: &[DirStr]) -> Result<(), Box<dyn E
                 let metadata = path.metadata()?;
                 let file_type_char = if path.is_dir() { 'd' } else { '-' };
                 let permissions = parse_permissions(&metadata);
-                let uid = if cfg!(unix) {
-                    #[cfg(unix)]
-                    {
-                        metadata.uid()
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        0
-                    }
-                } else {
-                    0
+                let uid =
+                    cfg_select! {
+                    unix=>metadata.uid(),
+                    _=>0
                 };
-                let gid = if cfg!(unix) {
-                    #[cfg(unix)]
-                    {
-                        metadata.gid()
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        0
-                    }
-                } else {
-                    0
+                let gid = cfg_select! {
+                    unix => metadata.gid(),
+                    _ => 0,
                 };
                 let size = metadata.len();
                 let modified_time = match metadata.modified() {
@@ -289,7 +274,7 @@ mod test {
         let expected = vec![
             DirStr {
                 name: "src".to_string(),
-                contents: vec![PathBuf::from("src/lib.rs"), PathBuf::from("src/main.rs")],
+                contents: vec![PathBuf::from("src/command.rs"), PathBuf::from("src/main.rs")],
             },
             DirStr {
                 name: "target".to_string(),
@@ -317,7 +302,7 @@ mod test {
         let expected = vec![
             DirStr {
                 name: "src".to_string(),
-                contents: vec![PathBuf::from("src/lib.rs"), PathBuf::from("src/main.rs")],
+                contents: vec![PathBuf::from("src/command.rs"), PathBuf::from("src/main.rs")],
             },
             DirStr {
                 name: "target".to_string(),
@@ -344,7 +329,7 @@ mod test {
         let expected = vec![
             DirStr {
                 name: "src".to_string(),
-                contents: vec![PathBuf::from("src/lib.rs"), PathBuf::from("src/main.rs")],
+                contents: vec![PathBuf::from("src/command.rs"), PathBuf::from("src/main.rs")],
             },
             DirStr {
                 name: "target".to_string(),
