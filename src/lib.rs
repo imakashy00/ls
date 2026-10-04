@@ -136,11 +136,7 @@ pub fn filter_contents(
             });
         } else {
             // alphabetically by filename
-            dir.contents.sort_by(|a, b| {
-                let name_a = a.file_name().unwrap_or_default();
-                let name_b = b.file_name().unwrap_or_default();
-                name_a.cmp(name_b)
-            });
+            dir.contents.sort_by(|a, b| { a.cmp(b) });
         }
     }
     Ok(())
@@ -152,10 +148,10 @@ pub fn display(config: &Config, dir_contents: &[DirStr]) -> Result<(), Box<dyn E
             println!("--{:?}--", dir.name);
         }
         for path in &dir.contents {
-            let mut display_name = path
-                .file_name()
-                .map(|str| str.to_string_lossy().into_owned())
-                .unwrap_or_else(|| dir.name.clone());
+            let mut display_name = match path.file_name() {
+                Some(str) => str.to_string_lossy().into_owned(),
+                None => dir.name.clone(),
+            };
 
             if path.is_dir() {
                 display_name.push('/');
@@ -189,13 +185,13 @@ pub fn display(config: &Config, dir_contents: &[DirStr]) -> Result<(), Box<dyn E
                     0
                 };
                 let size = metadata.len();
-                let modified_time = metadata
-                    .modified()
-                    .map(|mod_t| {
+                let modified_time = match metadata.modified() {
+                    Ok(mod_t) => {
                         let datetime: chrono::DateTime<chrono::Local> = mod_t.into();
                         datetime.format("%b %d %H:%M").to_string()
-                    })
-                    .unwrap_or_else(|_| String::from("Unkown Time"));
+                    }
+                    Err(_) => String::from("Unknown Time"),
+                };
                 println!(
                     "{}{} 1 {:>5} {:>5} {:>8} {} {}",
                     file_type_char,
@@ -266,14 +262,11 @@ mod test {
         assert!(!config.directory);
         assert!(!config.size);
         assert!(!config.time);
-
-        assert_eq!(
-            config.paths
-                .iter()
-                .map(|path| path.to_str().unwrap())
-                .collect::<Vec<&str>>(),
-            vec!["src", "target"]
-        )
+        let path_str: Vec<&str> = config.paths
+            .iter()
+            .filter_map(|path| path.to_str())
+            .collect();
+        assert_eq!(path_str, vec!["src", "target"])
     }
     #[test]
     fn test_config_build_panic() {
