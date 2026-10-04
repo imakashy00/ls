@@ -2,12 +2,12 @@
 use std::os::unix::fs::MetadataExt;
 use std::{ error::Error, fs::Metadata, path::PathBuf };
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct DirStr {
     pub name: String,
     pub contents: Vec<PathBuf>,
 }
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct Config {
     pub all: bool,
     pub long: bool,
@@ -45,6 +45,8 @@ impl Config {
                         }
                     }
                 }
+            } else if sub_command == "-" {
+                return Err("No such command found");
             } else {
                 config.paths.push(PathBuf::from(sub_command));
             }
@@ -59,7 +61,12 @@ impl Config {
         Ok(config)
     }
 }
-
+pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
+    let mut directory_contents = get_contents(&config.paths)?;
+    let _ = filter_contents(&config, &mut directory_contents);
+    let _ = display(&config, &directory_contents);
+    Ok(())
+}
 pub fn get_contents(config_path: &Vec<PathBuf>) -> Result<Vec<DirStr>, Box<dyn Error>> {
     // loop over all the all the items in config and chain them all
     let mut contents = Vec::new();
@@ -240,3 +247,122 @@ fn parse_permissions(metadata: &Metadata) -> String {
     }
 }
 
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_config_build() {
+        let args: Vec<String> = vec![
+            "target/debug/ls".into(),
+            "-l".into(),
+            "src".into(),
+            "target".into()
+        ];
+
+        let config = Config::build(&args).unwrap();
+
+        assert!(config.long);
+        assert!(!config.all);
+        assert!(!config.directory);
+        assert!(!config.size);
+        assert!(!config.time);
+
+        assert_eq!(
+            config.paths
+                .iter()
+                .map(|path| path.to_str().unwrap())
+                .collect::<Vec<&str>>(),
+            vec!["src", "target"]
+        )
+    }
+    #[test]
+    fn test_config_build_panic() {
+        let args: Vec<String> = vec![
+            "target/debug/ls".into(),
+            "-".into(),
+            "src".into(),
+            "target".into()
+        ];
+
+        assert_eq!(Config::build(&args), Err("No such command found"))
+    }
+    #[test]
+    fn test_get_contents() {
+        let args: Vec<String> = vec!["target/debug/ls".into(), "src".into(), "target".into()];
+        let config = Config::build(&args).unwrap();
+
+        let contents = get_contents(&config.paths).unwrap();
+        assert!(contents.len() > 0);
+        let expected = vec![
+            DirStr {
+                name: "src".to_string(),
+                contents: vec![PathBuf::from("src/lib.rs"), PathBuf::from("src/main.rs")],
+            },
+            DirStr {
+                name: "target".to_string(),
+                contents: vec![
+                    PathBuf::from("target/.rustc_info.json"),
+                    PathBuf::from("target/CACHEDIR.TAG"),
+                    PathBuf::from("target/flycheck0"),
+                    PathBuf::from("target/debug")
+                ],
+            }
+        ];
+        assert_eq!(contents, expected)
+    }
+    #[test]
+    fn test_filter_contents_single_option() {
+        let args: Vec<String> = vec![
+            "target/debug/ls".into(),
+            "-t".into(),
+            "src".into(),
+            "target".into()
+        ];
+        let config = Config::build(&args).unwrap();
+        let mut contents = get_contents(&config.paths).unwrap();
+        let _ = filter_contents(&config, &mut contents).unwrap();
+        let expected = vec![
+            DirStr {
+                name: "src".to_string(),
+                contents: vec![PathBuf::from("src/lib.rs"), PathBuf::from("src/main.rs")],
+            },
+            DirStr {
+                name: "target".to_string(),
+                contents: vec![
+                    PathBuf::from("target/debug"),
+                    PathBuf::from("target/flycheck0"),
+                    PathBuf::from("target/CACHEDIR.TAG")
+                ],
+            }
+        ];
+        assert_eq!(contents, expected)
+    }
+    #[test]
+    fn test_filter_contents_multiple_options() {
+        let args: Vec<String> = vec![
+            "target/debug/ls".into(),
+            "-at".into(),
+            "src".into(),
+            "target".into()
+        ];
+        let config = Config::build(&args).unwrap();
+        let mut contents = get_contents(&config.paths).unwrap();
+        let _ = filter_contents(&config, &mut contents).unwrap();
+        let expected = vec![
+            DirStr {
+                name: "src".to_string(),
+                contents: vec![PathBuf::from("src/lib.rs"), PathBuf::from("src/main.rs")],
+            },
+            DirStr {
+                name: "target".to_string(),
+                contents: vec![
+                    PathBuf::from("target/.rustc_info.json"),
+                    PathBuf::from("target/debug"),
+                    PathBuf::from("target/flycheck0"),
+                    PathBuf::from("target/CACHEDIR.TAG")
+                ],
+            }
+        ];
+        assert_eq!(contents, expected)
+    }
+}
